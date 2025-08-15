@@ -58,21 +58,20 @@ if platform.system() == "Windows":
 
 
 # --- Constants ---
-NEURO_VERSION = "2.6.5-IllusionLite-NoFirebase-247" # Updated version for tracking
+# MODIFICATION: Updated version and ad click probability
+NEURO_VERSION = "2.6.6-IllusionLite-MediumRisk" # Updated version for tracking
+AD_CLICK_PROBABILITY = 0.9 # MODIFIED: Increased to 90%
+
 MAX_THREADS_DEFAULT = 5 # Will be varied by Overmind
 MIN_SESSION_DURATION = 25
 MAX_SESSION_DURATION = 70
-AD_CLICK_PROBABILITY = 0.7
 MAX_AD_CLICKS = 5
 MAX_RETRIES = 2
 RETRY_DELAY_BASE = 5
 PROXY_REFRESH_INTERVAL = 3600
 
 # --- Illusion Engine Specific Constants ---
-# This will be initialized in NeuroThreadManager._update_overmind_params at start
-# and then daily. We set a default here just in case.
 DAILY_VISIT_QUOTA = random.randint(500, 1000)
-
 
 # --- Proxy Constants ---
 TRUSTED_PROXIES = [] # Populate this list or use environment variable
