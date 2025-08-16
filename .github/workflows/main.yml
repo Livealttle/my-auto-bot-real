@@ -1,15 +1,19 @@
+# A human-readable name for your workflow
 name: Run Neuro Bot
 
-# Ensures only ONE instance runs at a time. Cancels the old run if a new one starts.
+# Ensures only ONE instance of this workflow runs at a time.
+# If a new run is triggered by the schedule, it will automatically cancel the old one.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
+# --- TRIGGERS ---
+# Defines WHEN the workflow will run.
 on:
-  # Allows you to manually start the workflow from the Actions tab.
+  # This is the line that creates the manual "Run workflow" button.
   workflow_dispatch:
 
-  # --- "HIGH-UPTIME" IRREGULAR SCHEDULE ---
+  # "HIGH-UPTIME" IRREGULAR SCHEDULE
   # Triggers 6 times a day for ~15-18 hours of uptime.
   schedule:
     - cron: '12 1 * * *'   # Runs at 01:12 UTC
@@ -23,39 +27,37 @@ on:
   push:
     branches: [ "main" ]
 
+# --- JOBS ---
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository code
         uses: actions/checkout@v3
+
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y wget xvfb
+
       - name: Install Google Chrome
         run: |
           wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
           sudo dpkg -i google-chrome-stable_current_amd64.deb
           sudo apt-get install -f -y
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install numpy selenium requests fake-useragent psutil "urllib3<2"
+
       - name: Run Neuro Bot Script
         env:
           FIREBASE_GMAIL_USER: ${{ secrets.FIREBASE_GMAIL_USER }}
           FIREBASE_GMAIL_APP_PASSWORD: ${{ secrets.FIREBASE_GMAIL_APP_PASSWORD }}
-        run: python "Final version minions works gemeini buildt.py"```
-
-### **What to Do Now**
-
-1.  **Replace your Python script** with the new version from Part 1.
-2.  **Confirm your `main.yml`** matches the code in Part 2.
-3.  **Commit the changes** to your GitHub repository.
-
-The next time the workflow runs (either from your commit or the next scheduled time), it will use this enhanced, more human-like behavior.
+        run: python "Final version minions works gemeini buildt.py"
