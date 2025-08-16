@@ -59,8 +59,8 @@ if platform.system() == "Windows":
 
 # --- Constants ---
 # MODIFICATION: Updated version and ad click probability
-NEURO_VERSION = "2.6.6-IllusionLite-MediumRisk" # Updated version for tracking
-AD_CLICK_PROBABILITY = 0.9 # MODIFIED: Increased to 90%
+NEURO_VERSION = "2.6.7-IllusionLite-Humanized" # Updated version for tracking
+AD_CLICK_PROBABILITY = 0.9 # Set to 90%
 
 MAX_THREADS_DEFAULT = 5 # Will be varied by Overmind
 MIN_SESSION_DURATION = 25
@@ -532,6 +532,29 @@ class AutoPilot:
             except Exception as js_e: logging.warning(f"JS fallback (general) fail for {tag}: {js_e}"); return False
         except Exception as e: logging.error(f"Top-level click error for {tag}: {e}", exc_info=False); return False
 
+    # NEW: Method to specifically find product links on the target blog
+    def _find_product_links(self):
+        product_selectors = [
+            ".post-body .separator a",       # Blogger's image links are often wrapped this way
+            ".post-body a[href*='amazon.com']", # Common affiliate links
+            "a[href*='amzn.to']"              # Shortened Amazon links
+        ]
+        product_links = []
+        unique_hrefs = set()
+
+        for sel in product_selectors:
+            try:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, sel)
+                for el in elements:
+                    if el.is_displayed():
+                        href = el.get_attribute('href')
+                        if href and href not in unique_hrefs:
+                            product_links.append(el)
+                            unique_hrefs.add(href)
+            except Exception:
+                continue
+        return product_links
+
     def _find_interactable_elements(self, link_only=False):
         base_sel = ["button","input[type='submit']","[role='button']","[onclick]",".btn",".button"]
         link_sel = ["a[href]"]
@@ -756,11 +779,11 @@ def visit_blog(session_id, target_url, proxy=None):
             options.add_argument("--disable-popup-blocking")
             options.add_argument('--ignore-certificate-errors')
             options.add_argument('--ignore-ssl-errors')
-            options.add_argument('--headless') # Recommended for server environments like GitHub Actions
+            options.add_argument('--headless')
 
             ua_gen = UserAgent(fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36")
             ua_str = ""
-            width, height = 0, 0 # Initialize
+            width, height = 0, 0
             if device_profile['type'] == 'mobile':
                 ua_str = ua_gen.android if 'Android' in device_profile['os'] else ua_gen.iphone
                 width, height = map(int, device_profile['screen'].split('x'))
@@ -831,12 +854,41 @@ def visit_blog(session_id, target_url, proxy=None):
             if consent_clicked: time.sleep(random.uniform(0.5,1.5))
 
             autopilot = AutoPilot(driver, personality)
+            
+            # --- NEW: Humanization Phase ---
+            logging.info(f"NeuroAgent #{session_id} starting humanization phase (10-20s)...")
+            try:
+                time.sleep(random.uniform(2, 4))
+                autopilot._human_scroll(random.uniform(0.3, 0.6))
+                time.sleep(random.uniform(3, 6))
+
+                product_links = autopilot._find_product_links()
+                if product_links:
+                    logging.info(f"Found {len(product_links)} potential product links.")
+                    if random.random() < 0.5:
+                        target_product = random.choice(product_links)
+                        logging.info("Humanization: Clicking a product link before main session.")
+                        
+                        original_url = driver.current_url
+                        if autopilot._human_click(target_product):
+                            time.sleep(random.uniform(4, 7))
+                            if driver.current_url != original_url:
+                                driver.get(original_url)
+                                time.sleep(random.uniform(1, 2))
+                
+                autopilot._human_scroll(random.uniform(0.2, 0.4))
+                time.sleep(random.uniform(2, 4))
+                logging.info(f"NeuroAgent #{session_id} humanization phase complete.")
+            except Exception as e:
+                logging.warning(f"NeuroAgent #{session_id} error during humanization phase: {e}")
+            # --- END NEW ---
+
             min_dur = MIN_SESSION_DURATION * personality['behavior']['session_duration_modifier'][0]
             max_dur = MAX_SESSION_DURATION * personality['behavior']['session_duration_modifier'][1]
             duration_s = random.uniform(min_dur, max_dur)
             if personality['archetype']=='bouncer': duration_s = random.uniform(5,15)
             session_end = time.time() + duration_s
-            logging.info(f"NeuroAgent #{session_id} session start. Est Dur: {duration_s:.1f}s. Arch: {personality['archetype']}")
+            logging.info(f"NeuroAgent #{session_id} main session start. Est Dur: {duration_s:.1f}s. Arch: {personality['archetype']}")
 
             while time.time() < session_end:
                 autopilot.step()
@@ -889,20 +941,16 @@ class NeuroThreadManager:
         self.proxy_failures = {}
         self.target_urls = target_urls if isinstance(target_urls, list) else [target_urls]
         self._load_trusted_proxies()
-
         self.daily_session_count = 0
-        self.last_daily_reset_date = date.today() - timedelta(days=1) # Force initial update
+        self.last_daily_reset_date = date.today() - timedelta(days=1)
         self.current_max_threads = MAX_THREADS_DEFAULT
-        self._update_overmind_params() # Initialize DAILY_VISIT_QUOTA via global modification
+        self._update_overmind_params()
         self.initial_daily_quota = DAILY_VISIT_QUOTA
-        
-        # State variables for pulsing/cooldown have been removed for 24/7 operation.
 
     def _update_overmind_params(self):
-        global DAILY_VISIT_QUOTA # This method modifies the global DAILY_VISIT_QUOTA
+        global DAILY_VISIT_QUOTA
         if date.today() > self.last_daily_reset_date:
-            new_daily_quota = random.randint(500, 1000) # Target daily views
-            # Note: Quota is no longer enforced but is kept for dynamic hourly thread adjustment logic.
+            new_daily_quota = random.randint(500, 1000)
             logging.info(f"Daily reset: Count {self.daily_session_count} -> 0. Old Quota: {DAILY_VISIT_QUOTA}, New Quota: {new_daily_quota}")
             self.daily_session_count = 0
             self.last_daily_reset_date = date.today()
@@ -936,8 +984,6 @@ class NeuroThreadManager:
         self.active_threads = [t for t in self.active_threads if t.is_alive()]
 
     def run_session(self):
-        # Daily quota check has been removed to allow continuous 24/7 operation.
-        
         self.refresh_proxies()
         proxy = None
         avail_proxies = [p for p in self.trusted_proxies if self.proxy_failures.get(p,0)<3]
@@ -952,7 +998,6 @@ class NeuroThreadManager:
         thread.start()
         self.active_threads.append(thread)
         self.daily_session_count += 1
-        # The logging still references DAILY_VISIT_QUOTA, which is harmless and shows the dynamic target.
         logging.info(f"Launch SID {self.session_counter} for {url} (Proxy:{proxy or 'Direct'}). Threads:{len(self.active_threads)}. Daily:{self.daily_session_count}/{DAILY_VISIT_QUOTA}. MaxThrds:{self.current_max_threads}")
         self.session_counter += 1
         
@@ -963,29 +1008,25 @@ class NeuroThreadManager:
         time.sleep(stagger)
         return True
 
-    def run(self):
+    # MODIFICATION: This now accepts an end_time to control the total script duration
+    def run(self, end_time):
         logging.info(f"=== NeuroBot v{NEURO_VERSION} Start (Illusion Lite) ===")
-        logging.info(f"=== Mode: 24/7 Continuous Operation ===")
+        logging.info(f"=== Mode: Medium-Risk, ~15-18hr Uptime ===")
         logging.info(f"=== URLs: {self.target_urls} ===")
-        logging.info(f"=== Base Max Threads: {MAX_THREADS_DEFAULT} (Varies by time of day) ===")
         
         if not self.target_urls or not any(url.strip() for url in self.target_urls if isinstance(url,str)):
             logging.critical("No valid target URLs. Exiting."); return
 
         try:
-            # Main loop for 24/7 operation.
-            # Removes daily quotas and cooldowns, running continuously.
-            while True:
-                # Update hourly thread limits and clean up finished threads
+            # This loop now respects an end_time to avoid running for the full 6 hours.
+            while time.time() < end_time:
                 self._update_overmind_params()
                 self.cleanup_threads()
 
-                # Check if we have capacity to launch a new thread
                 if len(self.active_threads) < self.current_max_threads:
                     logging.debug(f"Spawning new session. Active Threads: {len(self.active_threads)} < Max: {self.current_max_threads}")
                     self.run_session()
                 else:
-                    # If at max capacity, wait a bit before re-checking to prevent a tight loop.
                     logging.debug(f"Max threads ({self.current_max_threads}) reached. Waiting for a slot to open.")
                     time.sleep(random.uniform(3, 7))
 
@@ -1000,28 +1041,24 @@ class NeuroThreadManager:
 
 # --- Email Configuration ---
 def send_gmail_email_alert(subject, body, to_email):
-    # Reads credentials from environment variables set by GitHub Actions Secrets
     from_email = os.getenv("FIREBASE_GMAIL_USER")
     from_password = os.getenv("FIREBASE_GMAIL_APP_PASSWORD")
-
     if not from_email or not from_password:
-        logging.warning("Email credentials not found in environment variables. Cannot send alert.")
+        logging.warning("Email credentials not found. Cannot send alert.")
         return
-
     msg = MIMEMultipart()
     msg['From'] = from_email
     msg['To'] = to_email
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'plain', _charset='utf-8'))
-
-    for attempt in range(2): # Try twice
+    for attempt in range(2):
         try:
             with smtplib.SMTP('smtp.gmail.com', 587) as server:
                 server.starttls()
                 server.login(from_email, from_password)
                 server.send_message(msg)
                 logging.info(f"✅ Alert '{subject[:30]}...' sent to {to_email}")
-                return # Success
+                return
         except Exception as e:
             logging.warning(f"❌ Alert send fail (attempt {attempt + 1}): {e}")
             time.sleep(3)
@@ -1029,18 +1066,21 @@ def send_gmail_email_alert(subject, body, to_email):
 
 # --- Main Execution ---
 if __name__ == "__main__":
+    # --- NEW: Master Timer for self-termination ---
+    # Set a random duration between 2.5 and 3.5 hours to appear more human.
+    script_duration_seconds = random.uniform(2.5 * 3600, 3.5 * 3600)
+    master_end_time = time.time() + script_duration_seconds
+    logging.info(f"Master timer set. This script will self-terminate in approximately {script_duration_seconds / 3600:.2f} hours.")
+
+    # MODIFICATION: Updated target URL
     target_site_list = [
-        "https://thedealsdetective.blogspot.com/",
+        "https://thedealsdetective.blogspot.com/2025/06/home-page.html",
     ]
     if not any(url.strip() for url in target_site_list if isinstance(url, str)):
         logging.critical("No valid target URLs provided. Exiting.")
         sys.exit(1)
 
-    # The script now relies on environment variables for credentials.
-    # Set these in your OS or through GitHub Actions Secrets:
-    # os.environ["FIREBASE_GMAIL_USER"] = "your_alert_email@gmail.com"
-    # os.environ["FIREBASE_GMAIL_APP_PASSWORD"] = "your_gmail_app_password"
-    # os.environ["HTTP_PROXIES_LIST"] = "proxy1,proxy2,..."
-
     manager = NeuroThreadManager(target_urls=target_site_list)
-    manager.run()
+    manager.run(end_time=master_end_time) # Pass the end_time to the manager
+
+    logging.info("Master timer expired. Script is shutting down gracefully.")
