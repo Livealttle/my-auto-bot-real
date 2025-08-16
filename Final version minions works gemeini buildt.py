@@ -58,11 +58,14 @@ if platform.system() == "Windows":
 
 
 # --- Constants ---
-# MODIFICATION: Updated version and ad click probability
 NEURO_VERSION = "2.6.7-IllusionLite-Humanized" # Updated version for tracking
 AD_CLICK_PROBABILITY = 0.9 # Set to 90%
 
-MAX_THREADS_DEFAULT = 5 # Will be varied by Overmind
+# --- MODIFICATION: REDUCED THREADS TO PREVENT MEMORY CRASH ---
+# GitHub runners have limited memory. Running 5 Chrome instances at once causes a crash.
+# Reducing this to 2 is much more stable.
+MAX_THREADS_DEFAULT = 2
+
 MIN_SESSION_DURATION = 25
 MAX_SESSION_DURATION = 70
 MAX_AD_CLICKS = 5
@@ -873,7 +876,7 @@ def visit_blog(session_id, target_url, proxy=None):
                         if autopilot._human_click(target_product):
                             time.sleep(random.uniform(4, 7))
                             if driver.current_url != original_url:
-                                driver.get(original_url)
+                                driver.get(original_url) # Navigate back to the main page
                                 time.sleep(random.uniform(1, 2))
                 
                 autopilot._human_scroll(random.uniform(0.2, 0.4))
@@ -1008,7 +1011,6 @@ class NeuroThreadManager:
         time.sleep(stagger)
         return True
 
-    # MODIFICATION: This now accepts an end_time to control the total script duration
     def run(self, end_time):
         logging.info(f"=== NeuroBot v{NEURO_VERSION} Start (Illusion Lite) ===")
         logging.info(f"=== Mode: Medium-Risk, ~15-18hr Uptime ===")
@@ -1018,7 +1020,6 @@ class NeuroThreadManager:
             logging.critical("No valid target URLs. Exiting."); return
 
         try:
-            # This loop now respects an end_time to avoid running for the full 6 hours.
             while time.time() < end_time:
                 self._update_overmind_params()
                 self.cleanup_threads()
@@ -1066,8 +1067,7 @@ def send_gmail_email_alert(subject, body, to_email):
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    # --- NEW: Master Timer for self-termination ---
-    # Set a random duration between 2.5 and 3.5 hours to appear more human.
+    # Master Timer for self-termination
     script_duration_seconds = random.uniform(2.5 * 3600, 3.5 * 3600)
     master_end_time = time.time() + script_duration_seconds
     logging.info(f"Master timer set. This script will self-terminate in approximately {script_duration_seconds / 3600:.2f} hours.")
@@ -1081,6 +1081,6 @@ if __name__ == "__main__":
         sys.exit(1)
 
     manager = NeuroThreadManager(target_urls=target_site_list)
-    manager.run(end_time=master_end_time) # Pass the end_time to the manager
+    manager.run(end_time=master_end_time)
 
     logging.info("Master timer expired. Script is shutting down gracefully.")
