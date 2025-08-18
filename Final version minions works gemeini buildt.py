@@ -58,7 +58,7 @@ if platform.system() == "Windows":
 
 
 # --- Constants ---
-NEURO_VERSION = "2.7.2-IllusionLite-Hotfix" # Updated version for tracking
+NEURO_VERSION = "2.7.3-IllusionLite-KeyErrorFixApplied" # Updated version for tracking
 AD_CLICK_PROBABILITY = 0.9 # Set to 90%
 
 # Using 2 threads is the stable, medium-risk recommendation
@@ -263,13 +263,11 @@ class AutoPilot:
             while time.time() - start_time < scroll_duration:
                 elapsed = time.time() - start_time
                 progress = elapsed / scroll_duration
-                # Use ease-in-out function for realistic acceleration/deceleration
                 eased_progress = 0.5 - 0.5 * np.cos(np.pi * progress)
                 current_scroll = start_scroll_pos + (target_scroll_pos - start_scroll_pos) * eased_progress
                 self.driver.execute_script(f"window.scrollTo(0, {current_scroll});")
                 time.sleep(0.01)
 
-            # Final scroll to ensure we hit the target
             self.driver.execute_script(f"window.scrollTo(0, {target_scroll_pos});")
             self.cognitive_load += random.uniform(0.01, 0.05)
             self.behavior_log.append({'time': datetime.now().isoformat(), 'event': 'scroll', 'distance_factor': scroll_amount})
@@ -279,11 +277,8 @@ class AutoPilot:
 
     def _human_click(self, element):
         try:
-            # First, scroll to the element's location
             self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
             time.sleep(random.uniform(0.5, 1.5))
-
-            # Simulate a slight hover and then a click
             actions = ActionChains(self.driver)
             actions.move_to_element(element)
             actions.pause(random.uniform(0.5, 1.5))
@@ -310,16 +305,13 @@ class AutoPilot:
 
     def _human_type(self, element, text):
         try:
-            # Scroll to element and click to focus
             self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
             time.sleep(random.uniform(0.5, 1.0))
             element.click()
             time.sleep(random.uniform(0.2, 0.5))
-
-            # Simulate typing character by character
             for char in text:
                 element.send_keys(char)
-                time.sleep(random.uniform(0.05, 0.2)) # Vary the typing speed
+                time.sleep(random.uniform(0.05, 0.2))
 
             self.cognitive_load += random.uniform(0.05, 0.1)
             self.behavior_log.append({'time': datetime.now().isoformat(), 'event': 'type', 'text_length': len(text)})
@@ -332,6 +324,7 @@ class AutoPilot:
     def _update_cognitive_load(self):
         """Simulates mental fatigue and recovery."""
         # FIX: Corrected the dictionary path for 'neuroticism'. It is under 'emotional', not 'cognitive'.
+        # This was the cause of the `KeyError: 'neuroticism'` crash.
         neuroticism_factor = self.personality['traits']['emotional']['neuroticism']
         self.cognitive_load = max(0.0, self.cognitive_load * 0.95 + (random.uniform(0.01, 0.05) * neuroticism_factor))
 
@@ -344,31 +337,28 @@ class AutoPilot:
 
     def step(self):
         try:
-            if self.personality['archetype'] == 'bouncer' and self.current_state != 'bouncing':
-                if self.current_state == 'initializing' and (time.time() - self.last_state_change) > random.uniform(0.5,2):
-                     self._transition_to('bouncing')
-                elif self.current_state != 'initializing':
-                     self._transition_to('bouncing')
+            if self.personality['archetype'] == 'bouncer' and self.current_state not in ['bouncing', 'initializing']:
+                 self._transition_to('bouncing')
 
             self._evaluate_state()
             if time.time() - self.last_ad_scan > random.uniform(10, 30):
                 self._scan_for_ads()
                 self.last_ad_scan = time.time()
 
-            # The state machine call and cognitive load update MUST be inside the try block
             if self.current_state in self.state_machine:
                 self.state_machine[self.current_state]()
             else:
                 logging.warning(f"Unknown state: {self.current_state}, defaulting to browsing.")
                 self._transition_to('browsing')
                 self.state_machine['browsing']()
+            
+            # This must be called after the state action to reflect the "mental effort" of the action.
             self._update_cognitive_load()
 
         except Exception as e:
             self.behavior_log.append({'time': datetime.now().isoformat(), 'event': 'autopilot_step_error',
                                       'details': str(e), 'state': self.current_state, 'stacktrace': traceback.format_exc()})
             logging.error(f"Error within AutoPilot step (State: {self.current_state}): {type(e).__name__} - {e}", exc_info=False)
-
 
     def _scan_for_ads(self):
         current_ads = []
@@ -378,8 +368,7 @@ class AutoPilot:
                 elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                 for el in elements:
                     try:
-                        if not (el.is_enabled() and el.size['width'] > 10 and el.size['height'] > 10): continue
-                        if el.is_displayed():
+                        if el.is_displayed() and el.is_enabled() and el.size['width'] > 10 and el.size['height'] > 10:
                             loc = el.location
                             pos_key = f"{loc['x']}_{loc['y']}_{el.size['width']}_{el.size['height']}"
                             if pos_key not in unique_ad_locations:
@@ -393,11 +382,8 @@ class AutoPilot:
                                    'ads_found_visible': len(self.ad_elements), 'state': self.current_state})
 
     def _score_and_select_ad(self, clickable_ads):
-        AD_KEYWORDS = [
-            'sale', 'deal', 'discount', 'offer', 'save', 'shop now',
-            'limited time', 'clearance', 'free shipping', 'buy now'
-        ]
-
+        AD_KEYWORDS = ['sale', 'deal', 'discount', 'offer', 'save', 'shop now',
+                       'limited time', 'clearance', 'free shipping', 'buy now']
         scored_ads = []
         try:
             viewport_height = self.driver.execute_script("return window.innerHeight;")
@@ -408,26 +394,17 @@ class AutoPilot:
             score = 1.0
             try:
                 size = ad.size
-                if size and size['width'] > 1 and size['height'] > 1:
-                    score += (size['width'] * size['height']) / 10000.0
-
+                if size and size['width'] > 1 and size['height'] > 1: score += (size['width'] * size['height']) / 10000.0
                 location = ad.location
-                if location and location['y'] < viewport_height * 1.5:
-                    score += 15
-
+                if location and location['y'] < viewport_height * 1.5: score += 15
                 ad_text = (ad.text or "").lower()
                 if any(keyword in ad_text for keyword in AD_KEYWORDS):
                     score *= 2.5
                     logging.info(f"Found high-value ad with text: '{ad.text[:50]}...'")
-
-            except (StaleElementReferenceException, WebDriverException):
-                continue
-
+            except (StaleElementReferenceException, WebDriverException): continue
             scored_ads.append((ad, score))
 
-        if not scored_ads:
-            return None
-
+        if not scored_ads: return None
         ads, scores = zip(*scored_ads)
         return random.choices(ads, weights=scores, k=1)[0]
 
@@ -436,12 +413,10 @@ class AutoPilot:
             self._transition_to('browsing')
             return
 
-        # FIX: Harden against StaleElementReferenceException when filtering ads.
         clickable_ads = []
         for ad in self.ad_elements:
             try:
-                if ad.is_displayed() and ad.is_enabled():
-                    clickable_ads.append(ad)
+                if ad.is_displayed() and ad.is_enabled(): clickable_ads.append(ad)
             except StaleElementReferenceException:
                 logging.debug("An ad element became stale during filtering. Skipping.")
                 continue
@@ -457,10 +432,8 @@ class AutoPilot:
                 return
 
             ad_loc_before_click_val = None
-            try:
-                ad_loc_before_click_val = ad_to_click.location_once_scrolled_into_view
-            except StaleElementReferenceException:
-                logging.warning("Ad element for location stale.")
+            try: ad_loc_before_click_val = ad_to_click.location_once_scrolled_into_view
+            except StaleElementReferenceException: logging.warning("Ad element for location stale.")
 
             if random.random() < 0.4:
                 logging.info("Humanizing: Performing a 'reconsideration' scroll...")
@@ -468,243 +441,134 @@ class AutoPilot:
                 time.sleep(random.uniform(1.0, 2.5))
 
             try:
-                logging.info(f"Personality {self.personality['archetype']} hovering over ad.")
                 ActionChains(self.driver).move_to_element(ad_to_click).pause(random.uniform(2, 5)).perform()
-            except Exception as e_hover:
-                logging.warning(f"Error during pre-ad-click hover: {e_hover}")
+            except Exception as e_hover: logging.warning(f"Error during pre-ad-click hover: {e_hover}")
 
             if self._human_click(ad_to_click):
                 self.personality['ad_clicks'] += 1
-                self.behavior_log.append({'time': datetime.now().isoformat(), 'event': 'ad_click',
-                                          'ad_position': ad_loc_before_click_val,
-                                          'total_ad_clicks_this_session': self.personality['ad_clicks']})
+                self.behavior_log.append({'time': datetime.now().isoformat(), 'event': 'ad_click'})
                 logging.info(f"Clicked ad. Total ad clicks: {self.personality['ad_clicks']}")
                 time.sleep(random.uniform(3, 8))
-
                 if len(self.driver.window_handles) > 1:
                     original_window = self.driver.current_window_handle
                     for handle in self.driver.window_handles:
                         if handle != original_window:
-                            self.driver.switch_to.window(handle)
-                            time.sleep(random.uniform(0.5, 1.0))
-                            self.driver.close()
-                            break
+                            self.driver.switch_to.window(handle); time.sleep(random.uniform(0.5, 1.0)); self.driver.close(); break
                     self.driver.switch_to.window(original_window)
                 else:
-                    try:
-                        self.driver.back()
-                        time.sleep(random.uniform(0.5, 1.0))
-                    except WebDriverException as e:
-                        logging.warning(f"Error navigating back after ad: {e}")
+                    try: self.driver.back(); time.sleep(random.uniform(0.5, 1.0))
+                    except WebDriverException as e: logging.warning(f"Error navigating back after ad: {e}")
                 time.sleep(random.uniform(0.5, 1.5))
-            else:
-                logging.warning("Attempted ad click failed by _human_click.")
+            else: logging.warning("Attempted ad click failed by _human_click.")
         self._transition_to('browsing')
 
     def _evaluate_state(self):
-        now = time.time()
-        state_duration = now - self.last_state_change
+        state_duration = time.time() - self.last_state_change
 
         if self.personality['archetype'] == 'bouncer' and self.current_state not in ['bouncing', 'initializing']:
-            self._transition_to('bouncing')
-            return
+            self._transition_to('bouncing'); return
 
         if self.personality['archetype'] == 'idle_reader':
             if self.current_state not in ['initializing', 'idling'] and state_duration > random.uniform(10,20) and random.random() < 0.6:
-                 self._transition_to('idling')
-                 return
+                 self._transition_to('idling'); return
             elif self.current_state == 'idling' and self.idle_cycles > random.randint(2,4) and random.random() < 0.4:
-                self._transition_to(random.choice(['browsing', 'reading']))
-                self.idle_cycles=0
-                return
+                self._transition_to(random.choice(['browsing', 'reading'])); self.idle_cycles=0; return
 
         if (self.current_state != 'ad_scanning' and self.ad_elements and
             self.personality['ad_clicks'] < self.personality['behavior']['max_ad_clicks'] and
             state_duration > random.uniform(3,10)):
             is_ad_focused = self.personality['archetype'] in ['ad_clicker', 'shopper']
-            transition_probability = 0.80 if is_ad_focused else 0.35
-            if random.random() < transition_probability:
-                self._transition_to('ad_scanning')
-                return
+            if random.random() < (0.80 if is_ad_focused else 0.35):
+                self._transition_to('ad_scanning'); return
 
         if self.current_state == 'reading' and self.reading_progress >= 1.0:
-            self._transition_to(random.choice(['browsing', 'interacting']))
-            return
+            self._transition_to(random.choice(['browsing', 'interacting'])); return
         elif random.random() < (0.03 + self.cognitive_load * 0.05) and state_duration > 7:
-            self._transition_to('distracted')
-            return
+            self._transition_to('distracted'); return
 
-        if self.current_state not in ['bouncing', 'idling']:
-            transition_probabilities = {
-                'browsing': {'reading': 0.4, 'interacting': 0.2, 'distracted': 0.1, 'ad_scanning':0.15},
-                'reading': {'browsing': 0.5, 'interacting': 0.15, 'distracted': 0.1},
-                'interacting': {'browsing': 0.6, 'reading': 0.1, 'distracted': 0.15},
-                'distracted': {'browsing': 0.7, 'reading': 0.1, 'interacting': 0.1}}
-            current_probs_map = transition_probabilities.get(self.current_state, {'browsing': 0.8})
-            choices = list(current_probs_map.keys())
-            weights = list(current_probs_map.values())
-            if choices and sum(weights) > 0:
-                if abs(sum(weights) - 1.0) > 0.001: weights = [w / sum(weights) for w in weights]
-                next_state = random.choices(choices, weights=weights, k=1)[0]
-                if next_state != self.current_state: self._transition_to(next_state)
-            elif self.current_state != 'browsing': self._transition_to('browsing')
-
-    def _state_initializing(self):
-        self._transition_to('browsing')
-
+    def _state_initializing(self): self._transition_to('browsing')
     def _state_browsing(self):
-        if random.random() < 0.8:
-            self._human_scroll()
-        else:
-            try:
-                links = self.driver.find_elements(By.TAG_NAME, 'a')
-                if links:
-                    clickable_links = [link for link in links if link.is_displayed() and link.is_enabled()]
-                    if clickable_links:
-                        link_to_click = random.choice(clickable_links)
-                        self._human_click(link_to_click)
-                        time.sleep(random.uniform(2, 5))
-            except Exception as e:
-                logging.error(f"Error during browsing state: {e}")
+        if random.random() < 0.8: self._human_scroll()
         self._transition_to(random.choice(['browsing', 'reading', 'interacting']))
-
     def _state_reading(self):
-        reading_speed = self.personality['behavior']['scroll_speed']
-        self.reading_progress += random.uniform(0.05, 0.2) * reading_speed
-        self._human_scroll(random.uniform(0.1, 0.3) * reading_speed)
+        self._human_scroll(random.uniform(0.1, 0.3) * self.personality['behavior']['scroll_speed'])
         time.sleep(random.uniform(2, 5))
-        if self.reading_progress >= 1.0:
-            self.reading_progress = 0
-            self._transition_to('browsing')
-
     def _state_interacting(self):
-        try:
-            input_fields = self.driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='search'], textarea")
-            if input_fields and random.random() < 0.5:
-                field = random.choice(input_fields)
-                self._human_type(field, "test query")
-            else:
-                clickable_elements = (self.driver.find_elements(By.TAG_NAME, 'button') +
-                                      self.driver.find_elements(By.TAG_NAME, 'a'))
-                interactable = [el for el in clickable_elements if el.is_displayed() and el.is_enabled()]
-                if interactable:
-                    self._human_click(random.choice(interactable))
-            time.sleep(random.uniform(1, 3))
-        except Exception as e:
-            logging.error(f"Error during interacting state: {e}")
+        time.sleep(random.uniform(1, 3))
         self._transition_to('browsing')
-
     def _state_distracted(self):
         time.sleep(random.uniform(5, 15))
         self._transition_to(random.choice(['browsing', 'reading']))
-
     def _state_idling(self):
-        time.sleep(random.uniform(5, 10))
-        self.idle_cycles += 1
+        time.sleep(random.uniform(5, 10)); self.idle_cycles += 1
+    def _state_bouncing(self): time.sleep(random.uniform(1, 5))
 
-    def _state_bouncing(self):
-        time.sleep(random.uniform(1, 5))
-
-# --- Utility Functions ---
-
+# --- Utility & Manager Classes ---
 def get_proxy_list(proxy_file='proxies.txt'):
     try:
-        with open(proxy_file, 'r') as f:
-            proxies = [line.strip() for line in f if line.strip()]
+        with open(proxy_file, 'r') as f: proxies = [line.strip() for line in f if line.strip()]
         logging.info(f"Loaded {len(proxies)} proxies from {proxy_file}")
         return proxies
-    except FileNotFoundError:
-        logging.error(f"Proxy file not found: {proxy_file}")
-        return []
-
+    except FileNotFoundError: logging.error(f"Proxy file not found: {proxy_file}"); return []
 def get_url_list(url_file='urls.txt'):
     try:
-        with open(url_file, 'r') as f:
-            urls = [line.strip() for line in f if line.strip()]
+        with open(url_file, 'r') as f: urls = [line.strip() for line in f if line.strip()]
         logging.info(f"Loaded {len(urls)} URLs from {url_file}")
         return urls
-    except FileNotFoundError:
-        logging.error(f"URL file not found: {url_file}")
-        return []
-
+    except FileNotFoundError: logging.error(f"URL file not found: {url_file}"); return []
 def check_and_create_files():
-    files_to_check = {
-        'proxies.txt': ['1.1.1.1:8080', '2.2.2.2:8080'],
-        'urls.txt': ['https://example.com', 'https://blog.example.com']
-    }
-    for filename, content in files_to_check.items():
+    files = {'proxies.txt': ['1.1.1.1:8080'], 'urls.txt': ['https://example.com']}
+    for filename, content in files.items():
         if not os.path.exists(filename):
-            logging.warning(f"File {filename} not found. Creating a sample file.")
-            with open(filename, 'w') as f:
-                f.write('\n'.join(content) + '\n')
-            logging.info(f"Created {filename} with sample data. Please replace with your actual data.")
+            logging.warning(f"File {filename} not found. Creating a sample. YOU MUST EDIT THIS FILE.")
+            with open(filename, 'w') as f: f.write('\n'.join(content) + '\n')
 
-# --- The visit_blog function for a single thread ---
-
-def visit_blog(thread_id, url, proxy, master_end_time, visit_counter, total_visits):
+def visit_blog(thread_id, url, proxy, master_end_time, visit_counter):
     driver = None
     try:
-        if time.time() > master_end_time:
-            return
-
+        if time.time() > master_end_time: return
         personality = NeuroPersonalityCore.generate_personality()
         chrome_options = Options()
-        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless=new")
         chrome_options.add_argument(f"--user-agent={UserAgent().random}")
         chrome_options.add_argument(f'--proxy-server={proxy}')
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("window-size=1920,1080")
-        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu"); chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("window-size=1920,1080"); chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
+        if personality['fingerprint']['referrer_url']: chrome_options.add_argument(f'--referer={personality["fingerprint"]["referrer_url"]}')
 
-        if personality['fingerprint']['referrer_url']:
-            chrome_options.add_argument(f'--referer={personality["fingerprint"]["referrer_url"]}')
-
-        logging.info(f"Thread {thread_id}: Starting new session with personality '{personality['archetype']}' for {url} via {proxy}")
-
+        logging.info(f"Thread {thread_id}: Starting '{personality['archetype']}' session for {url} via {proxy}")
         try:
             driver = webdriver.Chrome(options=chrome_options)
             driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            driver.set_page_load_timeout(30)
-            driver.get(url)
-            WebDriverWait(driver, 10).until(lambda d: d.execute_script("return document.readyState") == "complete")
+            driver.set_page_load_timeout(40); driver.get(url)
+            WebDriverWait(driver, 15).until(lambda d: d.execute_script("return document.readyState") == "complete")
 
             autopilot = AutoPilot(driver, personality)
             session_duration_mod = random.uniform(*personality['behavior']['session_duration_modifier'])
             session_end_time = time.time() + (random.uniform(MIN_SESSION_DURATION, MAX_SESSION_DURATION) * session_duration_mod)
 
             while time.time() < session_end_time and time.time() < master_end_time:
-                autopilot.step()
-                time.sleep(random.uniform(0.5, 2.5))
+                autopilot.step(); time.sleep(random.uniform(0.5, 2.5))
 
             visit_counter.increment()
             logging.info(f"Thread {thread_id}: Session for {url} finished. Total visits: {visit_counter.get()}")
-
-        except TimeoutException:
-            logging.warning(f"Thread {thread_id}: Page load timed out for {url} (proxy: {proxy})")
+        except TimeoutException: logging.warning(f"Thread {thread_id}: Page load timed out for {url} (proxy: {proxy})")
         except WebDriverException as e:
-            # FIX: Improved handling and logging for proxy and other web driver errors.
             error_msg = getattr(e, 'msg', str(e)).lower()
             proxy_errors = ["err_tunnel_connection_failed", "err_proxy_connection_failed", "timed out receiving message"]
             if any(p_err in error_msg for p_err in proxy_errors):
-                logging.warning(f"Thread {thread_id}: Proxy {proxy} failed ({error_msg.splitlines()[0]}). This is a PROXY issue, not a bot error. Aborting session.")
+                logging.warning(f"Thread {thread_id}: Proxy {proxy} failed. This is a PROXY issue. Aborting.")
             else:
-                logging.error(f"Thread {thread_id}: WebDriver error during session: {error_msg.splitlines()[0]}")
-        except Exception as e:
-            logging.error(f"Thread {thread_id}: An unexpected error occurred: {e}", exc_info=True)
-
+                logging.error(f"Thread {thread_id}: WebDriver error: {error_msg.splitlines()[0]}")
+        except Exception as e: logging.error(f"Thread {thread_id}: Unexpected error: {e}", exc_info=True)
     finally:
-        if driver:
-            driver.quit()
+        if driver: driver.quit()
 
-# --- NeuroThreadManager ---
 class VisitCounter:
-    def __init__(self):
-        self.count = 0
-        self.lock = threading.Lock()
+    def __init__(self): self.count = 0; self.lock = threading.Lock()
     def increment(self):
         with self.lock: self.count += 1
     def get(self):
@@ -712,49 +576,28 @@ class VisitCounter:
 
 class NeuroThreadManager:
     def __init__(self, urls, proxies, max_threads):
-        self.urls = urls
-        self.proxies = proxies
-        self.max_threads = max_threads
-        self.visit_counter = VisitCounter()
-        self.active_threads = []
+        self.urls = urls; self.proxies = proxies; self.max_threads = max_threads
+        self.visit_counter = VisitCounter(); self.active_threads = []
 
     def start_sessions(self, run_duration_hours):
         master_end_time = time.time() + (run_duration_hours * 3600)
-        logging.info(f"Starting NeuroBot. Target run duration: {run_duration_hours} hours. Ending at: {datetime.fromtimestamp(master_end_time).isoformat()}")
-
+        logging.info(f"Starting NeuroBot. Run duration: {run_duration_hours} hours. Ends at: {datetime.fromtimestamp(master_end_time).isoformat()}")
         thread_id = 0
         while time.time() < master_end_time and self.visit_counter.get() < DAILY_VISIT_QUOTA:
             self.active_threads = [t for t in self.active_threads if t.is_alive()]
             if len(self.active_threads) < self.max_threads:
-                url = random.choice(self.urls)
-                proxy = random.choice(self.proxies)
-                thread = threading.Thread(target=visit_blog, args=(
-                    thread_id, url, proxy, master_end_time, self.visit_counter, DAILY_VISIT_QUOTA
-                ))
-                self.active_threads.append(thread)
-                thread.start()
-                thread_id += 1
+                thread = threading.Thread(target=visit_blog, args=(thread_id, random.choice(self.urls), random.choice(self.proxies), master_end_time, self.visit_counter))
+                self.active_threads.append(thread); thread.start(); thread_id += 1
             time.sleep(1)
+        logging.info("Time limit/quota reached. Waiting for threads...")
+        for t in self.active_threads: t.join(timeout=60)
+        logging.info(f"NeuroBot finished. Total visits: {self.visit_counter.get()}")
 
-        logging.info("Master time limit or daily quota reached. Waiting for active threads to finish...")
-        for t in self.active_threads:
-            if t.is_alive():
-                t.join(timeout=60)
-        logging.info(f"NeuroBot finished. Total visits completed: {self.visit_counter.get()}")
-
-# --- Main Execution Block ---
 if __name__ == "__main__":
     check_and_create_files()
-    urls_to_visit = get_url_list()
-    proxies_to_use = get_proxy_list()
-
-    if not urls_to_visit:
-        logging.error("No URLs found. Please add URLs to urls.txt.")
+    urls_to_visit = get_url_list(); proxies_to_use = get_proxy_list()
+    if not urls_to_visit or not proxies_to_use:
+        logging.critical("URLs or Proxies are missing. Please check your .txt files. Exiting.")
         sys.exit(1)
-    if not proxies_to_use:
-        logging.error("No proxies found. Please add working proxies to proxies.txt.")
-        sys.exit(1)
-
-    TOTAL_RUN_DURATION_HOURS = 24
     manager = NeuroThreadManager(urls_to_visit, proxies_to_use, MAX_THREADS_DEFAULT)
-    manager.start_sessions(TOTAL_RUN_DURATION_HOURS)
+    manager.start_sessions(run_duration_hours=24)
