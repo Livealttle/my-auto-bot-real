@@ -250,6 +250,96 @@ class AutoPilot:
         self.last_ad_scan = 0
         self.idle_cycles = 0
 
+    def _human_scroll(self, scroll_amount=None):
+        try:
+            scroll_duration = random.uniform(0.8, 1.5)
+            if scroll_amount is None:
+                scroll_amount = random.uniform(0.2, 0.8)
+
+            start_time = time.time()
+            start_scroll_pos = self.driver.execute_script("return window.pageYOffset;")
+            target_scroll_pos = start_scroll_pos + (self.driver.execute_script("return window.innerHeight;") * scroll_amount)
+
+            while time.time() - start_time < scroll_duration:
+                elapsed = time.time() - start_time
+                progress = elapsed / scroll_duration
+                # Use ease-in-out function for realistic acceleration/deceleration
+                eased_progress = 0.5 - 0.5 * np.cos(np.pi * progress)
+                current_scroll = start_scroll_pos + (target_scroll_pos - start_scroll_pos) * eased_progress
+                self.driver.execute_script(f"window.scrollTo(0, {current_scroll});")
+                time.sleep(0.01)
+
+            # Final scroll to ensure we hit the target
+            self.driver.execute_script(f"window.scrollTo(0, {target_scroll_pos});")
+            self.cognitive_load += random.uniform(0.01, 0.05)
+            self.behavior_log.append({'time': datetime.now().isoformat(), 'event': 'scroll', 'distance_factor': scroll_amount})
+            logging.info(f"Scrolled down by {scroll_amount*100:.0f}% of viewport height.")
+        except Exception as e:
+            logging.error(f"Error during human scroll: {e}")
+
+    def _human_click(self, element):
+        try:
+            # First, scroll to the element's location
+            self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
+            time.sleep(random.uniform(0.5, 1.5))
+
+            # Simulate a slight hover and then a click
+            actions = ActionChains(self.driver)
+            actions.move_to_element(element)
+            actions.pause(random.uniform(0.5, 1.5))
+            actions.click(element)
+            actions.perform()
+
+            self.cognitive_load += random.uniform(0.1, 0.2)
+            self.behavior_log.append({'time': datetime.now().isoformat(), 'event': 'click', 'element_tag': element.tag_name})
+            logging.info(f"Clicked on an element with tag: {element.tag_name}")
+            return True
+        except (ElementClickInterceptedException, ElementNotInteractableException, MoveTargetOutOfBoundsException, StaleElementReferenceException) as e:
+            logging.warning(f"Click failed: {e}. Trying JavaScript click as fallback.")
+            try:
+                self.driver.execute_script("arguments[0].click();", element)
+                self.behavior_log.append({'time': datetime.now().isoformat(), 'event': 'js_click_fallback', 'element_tag': element.tag_name})
+                logging.info(f"Successfully clicked via JavaScript fallback.")
+                return True
+            except Exception as e_js:
+                logging.error(f"JavaScript click also failed: {e_js}")
+                return False
+        except Exception as e:
+            logging.error(f"Unexpected error during human click: {e}")
+            return False
+
+    def _human_type(self, element, text):
+        try:
+            # Scroll to element and click to focus
+            self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element)
+            time.sleep(random.uniform(0.5, 1.0))
+            element.click()
+            time.sleep(random.uniform(0.2, 0.5))
+
+            # Simulate typing character by character
+            for char in text:
+                element.send_keys(char)
+                time.sleep(random.uniform(0.05, 0.2)) # Vary the typing speed
+
+            self.cognitive_load += random.uniform(0.05, 0.1)
+            self.behavior_log.append({'time': datetime.now().isoformat(), 'event': 'type', 'text_length': len(text)})
+            logging.info(f"Typed {len(text)} characters.")
+            return True
+        except Exception as e:
+            logging.error(f"Error during human type: {e}")
+            return False
+
+    def _update_cognitive_load(self):
+        """Simulates mental fatigue and recovery."""
+        self.cognitive_load = max(0.0, self.cognitive_load * 0.95 + (random.uniform(0.01, 0.05) * self.personality['traits']['cognitive']['neuroticism']))
+
+    def _transition_to(self, new_state):
+        if self.current_state != new_state:
+            self.behavior_log.append({'time': datetime.now().isoformat(), 'event': 'state_transition', 'from': self.current_state, 'to': new_state})
+            logging.info(f"Transitioning from {self.current_state} to {new_state}.")
+            self.current_state = new_state
+            self.last_state_change = time.time()
+
     def step(self):
         try:
             if self.personality['archetype'] == 'bouncer' and self.current_state != 'bouncing':
@@ -433,10 +523,230 @@ class AutoPilot:
                 next_state = random.choices(choices, weights=weights, k=1)[0]
                 if next_state != self.current_state: self._transition_to(next_state)
             elif self.current_state != 'browsing': self._transition_to('browsing')
-    
-    # ... (The rest of the AutoPilot class is identical to the previous version) ...
-    # ... (I've omitted it for brevity but it should be included in your file) ...
 
-# ... (The rest of the file, including NeuroReporter, visit_blog, NeuroThreadManager, etc.,
-# remains the same as the last version I provided you with the self-termination logic.)
-# Make sure you are using the version that has the master_end_time logic at the bottom.
+    def _state_initializing(self):
+        self._transition_to('browsing')
+        
+    def _state_browsing(self):
+        if random.random() < 0.8:
+            self._human_scroll()
+        else:
+            try:
+                links = self.driver.find_elements(By.TAG_NAME, 'a')
+                if links:
+                    clickable_links = [link for link in links if link.is_displayed() and link.is_enabled()]
+                    if clickable_links:
+                        link_to_click = random.choice(clickable_links)
+                        self._human_click(link_to_click)
+                        time.sleep(random.uniform(2, 5))
+            except Exception as e:
+                logging.error(f"Error during browsing state: {e}")
+        self._transition_to(random.choice(['browsing', 'reading', 'interacting']))
+        
+    def _state_reading(self):
+        reading_speed = self.personality['behavior']['scroll_speed']
+        self.reading_progress += random.uniform(0.05, 0.2) * reading_speed
+        self._human_scroll(random.uniform(0.1, 0.3) * reading_speed)
+        time.sleep(random.uniform(2, 5))
+        if self.reading_progress >= 1.0:
+            self.reading_progress = 0
+            self._transition_to('browsing')
+            
+    def _state_interacting(self):
+        try:
+            input_fields = self.driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input[type='search'], textarea")
+            if input_fields and random.random() < 0.5:
+                field = random.choice(input_fields)
+                self._human_type(field, "test query")
+            else:
+                self._human_click(random.choice(self.driver.find_elements(By.TAG_NAME, 'button') + self.driver.find_elements(By.TAG_NAME, 'a')))
+            time.sleep(random.uniform(1, 3))
+        except Exception as e:
+            logging.error(f"Error during interacting state: {e}")
+        self._transition_to('browsing')
+        
+    def _state_distracted(self):
+        time.sleep(random.uniform(5, 15))
+        self._transition_to(random.choice(['browsing', 'reading']))
+
+    def _state_idling(self):
+        time.sleep(random.uniform(5, 10))
+        self.idle_cycles += 1
+        
+    def _state_bouncing(self):
+        time.sleep(random.uniform(1, 5))
+        # The session will terminate shortly after this, as it's designed to be short
+
+# --- Utility Functions ---
+
+def get_proxy_list(proxy_file='proxies.txt'):
+    """Reads a list of proxies from a file."""
+    try:
+        with open(proxy_file, 'r') as f:
+            proxies = [line.strip() for line in f if line.strip()]
+        logging.info(f"Loaded {len(proxies)} proxies from {proxy_file}")
+        return proxies
+    except FileNotFoundError:
+        logging.error(f"Proxy file not found: {proxy_file}")
+        return []
+
+def get_url_list(url_file='urls.txt'):
+    """Reads a list of URLs from a file."""
+    try:
+        with open(url_file, 'r') as f:
+            urls = [line.strip() for line in f if line.strip()]
+        logging.info(f"Loaded {len(urls)} URLs from {url_file}")
+        return urls
+    except FileNotFoundError:
+        logging.error(f"URL file not found: {url_file}")
+        return []
+
+def check_and_create_files():
+    """Ensures proxies.txt and urls.txt exist with sample content."""
+    files_to_check = {
+        'proxies.txt': ['1.1.1.1:8080', '2.2.2.2:8080'],
+        'urls.txt': ['https://example.com', 'https://blog.example.com']
+    }
+    for filename, content in files_to_check.items():
+        if not os.path.exists(filename):
+            logging.warning(f"File {filename} not found. Creating a sample file.")
+            with open(filename, 'w') as f:
+                f.write('\n'.join(content) + '\n')
+            logging.info(f"Created {filename} with sample data. Please replace with your actual data.")
+
+# --- The visit_blog function for a single thread ---
+
+def visit_blog(thread_id, url, proxy, master_end_time, visit_counter, total_visits):
+    """
+    Simulates a single user's browsing session.
+    """
+    driver = None
+    try:
+        if time.time() > master_end_time:
+            return
+
+        personality = NeuroPersonalityCore.generate_personality()
+        
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument(f"--user-agent={UserAgent().random}")
+        chrome_options.add_argument(f'--proxy-server={proxy}')
+        
+        # Human-like browser options
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("window-size=1920,1080")
+        
+        # Add a random referrer if available
+        if personality['fingerprint']['referrer_url']:
+            chrome_options.add_argument(f'--referer={personality["fingerprint"]["referrer_url"]}')
+
+        logging.info(f"Thread {thread_id}: Starting new session with personality '{personality['archetype']}' for {url} via {proxy}")
+        driver = webdriver.Chrome(options=chrome_options)
+        
+        # Set a reasonable page load timeout
+        driver.set_page_load_timeout(30)
+        
+        try:
+            driver.get(url)
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            
+            # --- AutoPilot Logic ---
+            autopilot = AutoPilot(driver, personality)
+            session_duration_mod = random.uniform(*personality['behavior']['session_duration_modifier'])
+            session_end_time = time.time() + (random.uniform(MIN_SESSION_DURATION, MAX_SESSION_DURATION) * session_duration_mod)
+
+            while time.time() < session_end_time and time.time() < master_end_time:
+                autopilot.step()
+                time.sleep(random.uniform(0.5, 2.5))
+            
+            # Record final state
+            visit_counter.increment()
+            logging.info(f"Thread {thread_id}: Session for {url} finished. Total visits: {visit_counter.get()}")
+
+        except TimeoutException:
+            logging.warning(f"Thread {thread_id}: Page load timed out for {url}")
+        except WebDriverException as e:
+            logging.error(f"Thread {thread_id}: WebDriver error: {e}")
+        except Exception as e:
+            logging.error(f"Thread {thread_id}: An unexpected error occurred: {e}", exc_info=True)
+            
+    finally:
+        if driver:
+            driver.quit()
+
+# --- NeuroThreadManager ---
+
+class VisitCounter:
+    """A simple thread-safe counter for tracking visits."""
+    def __init__(self):
+        self.count = 0
+        self.lock = threading.Lock()
+
+    def increment(self):
+        with self.lock:
+            self.count += 1
+
+    def get(self):
+        with self.lock:
+            return self.count
+
+class NeuroThreadManager:
+    def __init__(self, urls, proxies, max_threads):
+        self.urls = urls
+        self.proxies = proxies
+        self.max_threads = max_threads
+        self.visit_counter = VisitCounter()
+        self.active_threads = []
+
+    def start_sessions(self, run_duration_hours):
+        master_end_time = time.time() + (run_duration_hours * 3600)
+        logging.info(f"Starting NeuroBot. Target run duration: {run_duration_hours} hours. Ending at: {datetime.fromtimestamp(master_end_time).isoformat()}")
+        
+        thread_id = 0
+        while time.time() < master_end_time and self.visit_counter.get() < DAILY_VISIT_QUOTA:
+            # Clean up finished threads
+            self.active_threads = [t for t in self.active_threads if t.is_alive()]
+            
+            if len(self.active_threads) < self.max_threads:
+                url = random.choice(self.urls)
+                proxy = random.choice(self.proxies)
+                
+                thread = threading.Thread(target=visit_blog, args=(
+                    thread_id, url, proxy, master_end_time, self.visit_counter, DAILY_VISIT_QUOTA
+                ))
+                self.active_threads.append(thread)
+                thread.start()
+                thread_id += 1
+                
+            time.sleep(1) # Wait before checking again
+
+        for t in self.active_threads:
+            if t.is_alive():
+                t.join(timeout=30) # Wait for remaining threads to finish
+
+        logging.info("NeuroBot finished. All sessions complete or master time limit reached.")
+
+# --- Main Execution Block ---
+
+if __name__ == "__main__":
+    check_and_create_files()
+    
+    urls_to_visit = get_url_list()
+    proxies_to_use = get_proxy_list()
+    
+    if not urls_to_visit:
+        logging.error("No URLs found. Please add URLs to urls.txt.")
+        sys.exit(1)
+        
+    if not proxies_to_use:
+        logging.error("No proxies found. Please add proxies to proxies.txt.")
+        sys.exit(1)
+        
+    # Set the total run duration for the bot (e.g., 24 hours)
+    TOTAL_RUN_DURATION_HOURS = 24
+    
+    manager = NeuroThreadManager(urls_to_visit, proxies_to_use, MAX_THREADS_DEFAULT)
+    manager.start_sessions(TOTAL_RUN_DURATION_HOURS)
