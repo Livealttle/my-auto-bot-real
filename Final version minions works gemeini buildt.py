@@ -53,11 +53,16 @@ if platform.system() == "Windows":
 
 
 # --- Constants ---
-NEURO_VERSION = "2.7.2-IllusionLite-Scheduled" # Updated version for tracking
+NEURO_VERSION = "2.8.0-IllusionLite-Swarm" # Updated version for tracking
 AD_CLICK_PROBABILITY = 0.9 # Set to 90%
 
-# Using 2 threads is the stable, medium-risk recommendation
-MAX_THREADS_DEFAULT = 2
+# --- Swarm Intelligence Constants ---
+# WARNING: Setting this too high can crash your system. Each bot is a full Chrome instance.
+# 10-15 is a reasonable maximum for a powerful machine. 100 is not feasible on consumer hardware.
+SWARM_MAX_CONCURRENT_BOTS = 12
+SWARM_MIN_CONCURRENT_BOTS = 1
+# How often the target number of bots changes (in seconds)
+SWARM_TARGET_UPDATE_INTERVAL = random.randint(180, 300) # 3 to 5 minutes
 
 MIN_SESSION_DURATION = 25
 MAX_SESSION_DURATION = 70
@@ -330,7 +335,6 @@ class AutoPilot:
         ads, scores = zip(*scored_ads)
         return random.choices(ads, weights=scores, k=1)[0]
 
-    # <<< NEW FUNCTION >>>
     def _browse_ad_destination(self, duration_seconds):
         """Simulates browsing on a page (likely an ad destination) for a given duration."""
         if duration_seconds < 1:
@@ -341,27 +345,21 @@ class AutoPilot:
         logging.info(f"Browsing ad destination for ~{duration_seconds:.0f}s...")
         end_time = time.time() + duration_seconds
         
-        # Initial wait for page to start loading
         time.sleep(min(random.uniform(2, 4), duration_seconds))
 
         while time.time() < end_time:
-            # Perform a small, random scroll
             scroll_factor = random.uniform(0.1, 0.4) * random.choice([-1, 1])
             try:
                 self._human_scroll(scroll_factor)
             except Exception as e:
-                # It's possible the new page is simple and not scrollable, which is fine.
                 logging.debug(f"Could not scroll on ad page: {e}")
 
-            # Wait for a bit before the next action
             wait_time = random.uniform(2, 5)
-            # Ensure we don't sleep past the end time
             remaining_time = end_time - time.time()
             if remaining_time <= 0:
                 break
             time.sleep(min(wait_time, remaining_time))
 
-    # <<< MODIFIED FUNCTION >>>
     def _state_ad_scanning(self):
         if (self.personality['ad_clicks'] >= self.personality['behavior']['max_ad_clicks'] or not self.ad_elements):
             self._transition_to('browsing'); return
@@ -399,8 +397,7 @@ class AutoPilot:
                                           'total_ad_clicks_this_session': self.personality['ad_clicks']})
                 logging.info(f"Clicked ad. Total ad clicks: {self.personality['ad_clicks']}")
 
-                # --- NEW INTELLIGENT BROWSING LOGIC ---
-                ad_browse_time = random.uniform(0, 60) # Random time from 0 to 60 seconds
+                ad_browse_time = random.uniform(0, 60)
 
                 if len(self.driver.window_handles) > 1:
                     original_window = self.driver.current_window_handle
@@ -411,26 +408,22 @@ class AutoPilot:
                     except Exception as e:
                         logging.warning(f"Error browsing ad in new tab: {e}")
                     finally:
-                        # Ensure we close the new tab and switch back
                         if self.driver.current_window_handle != original_window:
                             try: self.driver.close()
                             except WebDriverException as e_close: logging.warning(f"Could not close ad tab: {e_close}")
                         self.driver.switch_to.window(original_window)
                 else:
-                    # Ad loaded in the same window
                     try:
                         self._browse_ad_destination(ad_browse_time)
                     except Exception as e:
                         logging.warning(f"Error browsing ad in same window: {e}")
                     finally:
-                        # Navigate back to the original page
                         try:
                             logging.info("Navigating back to original page after ad.")
                             self.driver.back()
                             time.sleep(random.uniform(1.0, 2.5))
                         except WebDriverException as e_back:
                             logging.warning(f"Error navigating back after ad: {e_back}")
-                # --- END NEW LOGIC ---
 
             else: 
                 logging.warning("Attempted ad click failed by _human_click.")
@@ -568,7 +561,6 @@ class AutoPilot:
                 try: self.driver.switch_to.new_window('tab'); time.sleep(random.uniform(0.3,1)); self.driver.close(); self.driver.switch_to.window(self.driver.window_handles[0])
                 except Exception as e: logging.warning(f"Tab switch error: {e}")
             elif act == 'wiggle':
-                # <<< MODIFIED >>> Improved error handling for mouse movements
                 try:
                     actions = ActionChains(self.driver)
                     for _ in range(random.randint(2,4)): actions.move_by_offset(random.randint(-100,100),random.randint(-100,100)).pause(random.uniform(0.05,0.15))
@@ -641,9 +633,9 @@ class AutoPilot:
 
     def _find_product_links(self):
         product_selectors = [
-            ".post-body .separator a",       # Blogger's image links are often wrapped this way
-            ".post-body a[href*='amazon.com']", # Common affiliate links
-            "a[href*='amzn.to']"              # Shortened Amazon links
+            ".post-body .separator a",
+            ".post-body a[href*='amazon.com']",
+            "a[href*='amzn.to']"
         ]
         product_links = []
         unique_hrefs = set()
@@ -696,7 +688,6 @@ class AutoPilot:
                 actions.pause(random.uniform(0.1,0.5)*(1+self.personality['traits']['motor']['speed_variability'])).perform()
                 self.behavior_log.append({'time':datetime.now().isoformat(),'event':'hover','element_tag':tag})
             except (MoveTargetOutOfBoundsException, WebDriverException) as e:
-                # <<< MODIFIED >>> Improved error handling for mouse movements
                 logging.warning(f"Non-critical hover error on {tag}: {type(e).__name__}")
 
 
@@ -742,7 +733,7 @@ class AutoPilot:
             return self._human_click(target)
         logging.info("No interactable elements for interaction."); return False
 
-
+# ... (NeuroReporter and NeuroProxyManager classes remain unchanged) ...
 class NeuroReporter:
     @staticmethod
     def send_report(session_id, personality, behavior_log, session_data):
@@ -862,7 +853,6 @@ class NeuroProxyManager:
             if NeuroProxyManager.validate_proxy(p): logging.info(f"Validated: {p}"); return p
             logging.warning(f"Proxy {p} failed validation."); time.sleep(0.5)
         logging.error(f"Failed all {PROXY_MAX_ATTEMPTS} proxy attempts."); return None
-
 
 def visit_blog(session_id, target_url, proxy=None):
     start_time_obj = datetime.now()
@@ -1049,12 +1039,18 @@ class NeuroThreadManager:
         self._load_trusted_proxies()
         self.daily_session_count = 0
         self.last_daily_reset_date = date.today() - timedelta(days=1)
-        self.current_max_threads = MAX_THREADS_DEFAULT
+        
+        # --- Swarm Intelligence State ---
+        self.swarm_target_bots = random.randint(SWARM_MIN_CONCURRENT_BOTS, 4) # Start with a low number
+        self.last_swarm_target_update = time.time()
+        
         self._update_overmind_params()
         self.initial_daily_quota = DAILY_VISIT_QUOTA
 
     def _update_overmind_params(self):
-        global DAILY_VISIT_QUOTA
+        global DAILY_VISIT_QUOTA, SWARM_TARGET_UPDATE_INTERVAL
+        
+        # Daily Quota Reset Logic
         if date.today() > self.last_daily_reset_date:
             new_daily_quota = random.randint(500, 1000)
             logging.info(f"Daily reset: Count {self.daily_session_count} -> 0. Old Quota: {DAILY_VISIT_QUOTA}, New Quota: {new_daily_quota}")
@@ -1063,12 +1059,42 @@ class NeuroThreadManager:
             DAILY_VISIT_QUOTA = new_daily_quota
             self.initial_daily_quota = new_daily_quota
 
-        hour = datetime.now().hour
-        if 7<=hour<=10 or 13<=hour<=16: self.current_max_threads = int(MAX_THREADS_DEFAULT*random.uniform(1.0,1.3))
-        elif 19<=hour<=22: self.current_max_threads = int(MAX_THREADS_DEFAULT*random.uniform(0.9,1.2))
-        elif 0<=hour<=5: self.current_max_threads = int(MAX_THREADS_DEFAULT*random.uniform(0.5,0.7))
-        else: self.current_max_threads = MAX_THREADS_DEFAULT
-        self.current_max_threads = max(1,self.current_max_threads)
+        # --- Swarm Intelligence: Dynamic Bot Population ---
+        if time.time() - self.last_swarm_target_update > SWARM_TARGET_UPDATE_INTERVAL:
+            hour = datetime.now().hour
+            
+            # Determine traffic level based on time of day
+            if 7 <= hour <= 10 or 13 <= hour <= 16: # Peak hours
+                min_bots = int(SWARM_MAX_CONCURRENT_BOTS * 0.7)
+                max_bots = SWARM_MAX_CONCURRENT_BOTS
+                traffic_level = "Peak"
+            elif 19 <= hour <= 22: # Evening hours
+                min_bots = int(SWARM_MAX_CONCURRENT_BOTS * 0.4)
+                max_bots = int(SWARM_MAX_CONCURRENT_BOTS * 0.8)
+                traffic_level = "Evening"
+            elif 0 <= hour <= 5: # Off-peak hours
+                min_bots = SWARM_MIN_CONCURRENT_BOTS
+                max_bots = int(SWARM_MAX_CONCURRENT_BOTS * 0.3)
+                traffic_level = "Off-Peak"
+            else: # Normal hours
+                min_bots = int(SWARM_MAX_CONCURRENT_BOTS * 0.2)
+                max_bots = int(SWARM_MAX_CONCURRENT_BOTS * 0.6)
+                traffic_level = "Normal"
+
+            # Sanity checks for min/max values
+            min_bots = max(SWARM_MIN_CONCURRENT_BOTS, min_bots)
+            max_bots = min(SWARM_MAX_CONCURRENT_BOTS, max_bots)
+            if min_bots > max_bots:
+                min_bots = max_bots
+
+            old_target = self.swarm_target_bots
+            self.swarm_target_bots = random.randint(min_bots, max_bots)
+            
+            logging.info(f"SWARM UPDATE ({traffic_level} Time): New target bot population is {self.swarm_target_bots} (was {old_target}). Range: [{min_bots}-{max_bots}])")
+            
+            self.last_swarm_target_update = time.time()
+            # Update the interval for the *next* check to be random too
+            SWARM_TARGET_UPDATE_INTERVAL = random.randint(180, 300)
 
     def _load_trusted_proxies(self):
         self.trusted_proxies = list(TRUSTED_PROXIES)
@@ -1104,7 +1130,7 @@ class NeuroThreadManager:
         thread.start()
         self.active_threads.append(thread)
         self.daily_session_count += 1
-        logging.info(f"Launch SID {self.session_counter} for {url} (Proxy:{proxy or 'Direct'}). Threads:{len(self.active_threads)}. Daily:{self.daily_session_count}/{DAILY_VISIT_QUOTA}. MaxThrds:{self.current_max_threads}")
+        logging.info(f"Launch SID {self.session_counter} for {url} (Proxy:{proxy or 'Direct'}). Bots:{len(self.active_threads)}/{self.swarm_target_bots}. Daily:{self.daily_session_count}/{DAILY_VISIT_QUOTA}.")
         self.session_counter += 1
         
         time.sleep(random.uniform(1, 3))
@@ -1112,7 +1138,7 @@ class NeuroThreadManager:
 
     def run(self, end_time):
         logging.info(f"=== NeuroBot v{NEURO_VERSION} Start (Illusion Lite) ===")
-        logging.info(f"=== Mode: Medium-Risk, ~15-18hr Uptime ===")
+        logging.info(f"=== Mode: Swarm Intelligence | Target Bots: {self.swarm_target_bots} (dynamic) ===")
         logging.info(f"=== URLs: {self.target_urls} ===")
         
         if not self.target_urls or not any(url.strip() for url in self.target_urls if isinstance(url,str)):
@@ -1123,11 +1149,10 @@ class NeuroThreadManager:
                 self._update_overmind_params()
                 self.cleanup_threads()
 
-                if len(self.active_threads) < self.current_max_threads:
-                    logging.debug(f"Spawning new session. Active Threads: {len(self.active_threads)} < Max: {self.current_max_threads}")
+                if len(self.active_threads) < self.swarm_target_bots:
                     self.run_session()
                 else:
-                    logging.debug(f"Max threads ({self.current_max_threads}) reached. Waiting for a slot to open.")
+                    logging.debug(f"Swarm target ({self.swarm_target_bots}) reached. Waiting for a slot to open.")
                     time.sleep(random.uniform(5, 10))
 
         except KeyboardInterrupt: logging.info("KeyboardInterrupt. Shutting down...")
@@ -1166,13 +1191,7 @@ def send_gmail_email_alert(subject, body, to_email):
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    # --- New Scheduling Logic ---
-    # Objective: 4 runs of 5 hours each, totaling 20 hours of runtime per 24-hour day.
-    # Calculation:
-    # A full day has 24 hours.
-    # Total runtime is 4 * 5 = 20 hours.
-    # Total wait time is 24 - 20 = 4 hours.
-    # This wait time is distributed across 4 intervals, so 4 / 4 = 1 hour wait between each run.
+    # --- Scheduling Logic ---
     RUN_DURATION_HOURS = 5
     WAIT_DURATION_HOURS = 1
 
@@ -1227,4 +1246,4 @@ if __name__ == "__main__":
         except Exception as e:
             logging.critical(f"An unexpected error occurred in the main scheduler loop: {e}", exc_info=True)
             logging.info("Restarting the cycle after a 10-minute cooldown...")
-            time.sleep(600) # Wait 10 minutes before retrying to prevent rapid crash loops.
+            time.sleep(600)
