@@ -53,7 +53,7 @@ if platform.system() == "Windows":
 
 
 # --- Constants ---
-NEURO_VERSION = "2.7.0-IllusionLite-Intelligent" # Updated version for tracking
+NEURO_VERSION = "2.7.1-IllusionLite-Intelligent-Enhanced" # Updated version for tracking
 AD_CLICK_PROBABILITY = 0.9 # Set to 90%
 
 # Using 2 threads is the stable, medium-risk recommendation
@@ -293,7 +293,7 @@ class AutoPilot:
 
     def _score_and_select_ad(self, clickable_ads):
         AD_KEYWORDS = [
-            'sale', 'deal', 'discount', 'offer', 'save', 'shop now', 
+            'sale', 'deal', 'discount', 'offer', 'save', 'shop now',
             'limited time', 'clearance', 'free shipping', 'buy now'
         ]
         
@@ -330,6 +330,38 @@ class AutoPilot:
         ads, scores = zip(*scored_ads)
         return random.choices(ads, weights=scores, k=1)[0]
 
+    # <<< NEW FUNCTION >>>
+    def _browse_ad_destination(self, duration_seconds):
+        """Simulates browsing on a page (likely an ad destination) for a given duration."""
+        if duration_seconds < 1:
+            logging.info("Ad browse time is near zero, returning immediately.")
+            time.sleep(duration_seconds)
+            return
+            
+        logging.info(f"Browsing ad destination for ~{duration_seconds:.0f}s...")
+        end_time = time.time() + duration_seconds
+        
+        # Initial wait for page to start loading
+        time.sleep(min(random.uniform(2, 4), duration_seconds))
+
+        while time.time() < end_time:
+            # Perform a small, random scroll
+            scroll_factor = random.uniform(0.1, 0.4) * random.choice([-1, 1])
+            try:
+                self._human_scroll(scroll_factor)
+            except Exception as e:
+                # It's possible the new page is simple and not scrollable, which is fine.
+                logging.debug(f"Could not scroll on ad page: {e}")
+
+            # Wait for a bit before the next action
+            wait_time = random.uniform(2, 5)
+            # Ensure we don't sleep past the end time
+            remaining_time = end_time - time.time()
+            if remaining_time <= 0:
+                break
+            time.sleep(min(wait_time, remaining_time))
+
+    # <<< MODIFIED FUNCTION >>>
     def _state_ad_scanning(self):
         if (self.personality['ad_clicks'] >= self.personality['behavior']['max_ad_clicks'] or not self.ad_elements):
             self._transition_to('browsing'); return
@@ -354,8 +386,11 @@ class AutoPilot:
 
             try:
                 logging.info(f"Personality {self.personality['archetype']} hovering over ad.")
-                ActionChains(self.driver).move_to_element(ad_to_click).pause(random.uniform(2, 5)).perform()
-            except Exception as e_hover: logging.warning(f"Error during pre-ad-click hover: {e_hover}")
+                ActionChains(self.driver).move_to_element(ad_to_click).pause(random.uniform(1, 3)).perform()
+            except (MoveTargetOutOfBoundsException, StaleElementReferenceException) as e_hover: 
+                logging.warning(f"Non-critical error during pre-ad-click hover: {type(e_hover).__name__}")
+            except Exception as e_hover:
+                 logging.warning(f"Error during pre-ad-click hover: {e_hover}")
 
             if self._human_click(ad_to_click):
                 self.personality['ad_clicks'] += 1
@@ -363,19 +398,43 @@ class AutoPilot:
                                           'ad_position': ad_loc_before_click_val,
                                           'total_ad_clicks_this_session': self.personality['ad_clicks']})
                 logging.info(f"Clicked ad. Total ad clicks: {self.personality['ad_clicks']}")
-                time.sleep(random.uniform(3, 8))
+
+                # --- NEW INTELLIGENT BROWSING LOGIC ---
+                ad_browse_time = random.uniform(0, 60) # Random time from 0 to 60 seconds
 
                 if len(self.driver.window_handles) > 1:
                     original_window = self.driver.current_window_handle
-                    for handle in self.driver.window_handles:
-                        if handle != original_window:
-                            self.driver.switch_to.window(handle); time.sleep(random.uniform(0.5,1.0)); self.driver.close(); break
-                    self.driver.switch_to.window(original_window)
+                    new_window = [handle for handle in self.driver.window_handles if handle != original_window][0]
+                    try:
+                        self.driver.switch_to.window(new_window)
+                        self._browse_ad_destination(ad_browse_time)
+                    except Exception as e:
+                        logging.warning(f"Error browsing ad in new tab: {e}")
+                    finally:
+                        # Ensure we close the new tab and switch back
+                        if self.driver.current_window_handle != original_window:
+                            try: self.driver.close()
+                            except WebDriverException as e_close: logging.warning(f"Could not close ad tab: {e_close}")
+                        self.driver.switch_to.window(original_window)
                 else:
-                    try: self.driver.back(); time.sleep(random.uniform(0.5,1.0))
-                    except WebDriverException as e: logging.warning(f"Error navigating back after ad: {e}")
-                time.sleep(random.uniform(0.5, 1.5))
-            else: logging.warning("Attempted ad click failed by _human_click.")
+                    # Ad loaded in the same window
+                    try:
+                        self._browse_ad_destination(ad_browse_time)
+                    except Exception as e:
+                        logging.warning(f"Error browsing ad in same window: {e}")
+                    finally:
+                        # Navigate back to the original page
+                        try:
+                            logging.info("Navigating back to original page after ad.")
+                            self.driver.back()
+                            time.sleep(random.uniform(1.0, 2.5))
+                        except WebDriverException as e_back:
+                            logging.warning(f"Error navigating back after ad: {e_back}")
+                # --- END NEW LOGIC ---
+
+            else: 
+                logging.warning("Attempted ad click failed by _human_click.")
+        
         self._transition_to('browsing')
 
     def _evaluate_state(self):
@@ -509,11 +568,14 @@ class AutoPilot:
                 try: self.driver.switch_to.new_window('tab'); time.sleep(random.uniform(0.3,1)); self.driver.close(); self.driver.switch_to.window(self.driver.window_handles[0])
                 except Exception as e: logging.warning(f"Tab switch error: {e}")
             elif act == 'wiggle':
+                # <<< MODIFIED >>> Improved error handling for mouse movements
                 try:
                     actions = ActionChains(self.driver)
                     for _ in range(random.randint(2,4)): actions.move_by_offset(random.randint(-100,100),random.randint(-100,100)).pause(random.uniform(0.05,0.15))
                     actions.perform()
-                except Exception as e: logging.warning(f"Mouse wiggle error: {e}")
+                except (MoveTargetOutOfBoundsException, WebDriverException) as e:
+                     logging.warning(f"Non-critical mouse wiggle error suppressed: {type(e).__name__}")
+
             time.sleep(random.uniform(0.2,0.8))
         self._transition_to('browsing')
 
@@ -633,7 +695,9 @@ class AutoPilot:
                 actions.move_to_element_with_offset(el, el.size['width']//2, el.size['height']//2)
                 actions.pause(random.uniform(0.1,0.5)*(1+self.personality['traits']['motor']['speed_variability'])).perform()
                 self.behavior_log.append({'time':datetime.now().isoformat(),'event':'hover','element_tag':tag})
-            except Exception as e: logging.warning(f"Hover error on {tag}: {type(e).__name__}")
+            except (MoveTargetOutOfBoundsException, WebDriverException) as e:
+                # <<< MODIFIED >>> Improved error handling for mouse movements
+                logging.warning(f"Non-critical hover error on {tag}: {type(e).__name__}")
 
 
     def _simulate_typing(self, element):
@@ -674,7 +738,7 @@ class AutoPilot:
             except:pass
             internal = [el for el in elements if el.tag_name=='a' and el.get_attribute('href') and current_domain and current_domain in el.get_attribute('href')]
             if (link_only and internal and random.random()<0.8) or (internal and random.random()<0.5): target=random.choice(internal)
-            logging.info(f"Interacting with {tag} (Text: {txt})")
+            logging.info(f"Interacting with a ({tag}: {txt})")
             return self._human_click(target)
         logging.info("No interactable elements for interaction."); return False
 
