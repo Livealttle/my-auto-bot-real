@@ -1,7 +1,7 @@
 import time
 import random
 import threading
-import smtplib.       stop 🛑 
+import smtplib
 import json
 import numpy as np
 from email.mime.text import MIMEText
